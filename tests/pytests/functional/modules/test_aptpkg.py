@@ -1,3 +1,4 @@
+import os
 import pathlib
 import shutil
 
@@ -5,7 +6,10 @@ import pytest
 import salt.exceptions
 import salt.modules.aptpkg as aptpkg
 import salt.modules.cmdmod as cmd
+import salt.modules.config as config
+import salt.modules.cp as cp
 import salt.modules.file as file
+import salt.modules.gpg as gpg
 import salt.utils.files
 import salt.utils.stringutils
 from tests.support.mock import Mock, patch
@@ -13,6 +17,36 @@ from tests.support.mock import Mock, patch
 pytestmark = [
     pytest.mark.skip_if_binaries_missing("apt-cache", "grep"),
 ]
+
+KEY_FILES = (
+    "salt-archive-keyring.gpg",
+    "SALTSTACK-GPG-KEY.pub",
+)
+
+
+class Key:
+    def __init__(self, aptkey=True):
+        self.aptkey = aptkey
+        self.keyname = "salt-archive-keyring.gpg"
+
+    def add_key(self):
+        keydir = pathlib.Path("/etc", "apt", "keyrings")
+        if not keydir.is_dir():
+            keydir.mkdir()
+        aptpkg.add_repo_key("salt://{}".format(self.keyname), aptkey=self.aptkey)
+
+    def del_key(self):
+        aptpkg.del_repo_key(keyid="0E08A149DE57BFBE", aptkey=self.aptkey)
+
+
+@pytest.fixture
+def get_key_file(request, state_tree, functional_files_dir):
+    """
+    Create the key file used for the repo by file name passed to the test
+    """
+    keyname = request.param
+    shutil.copy(str(functional_files_dir / keyname), str(state_tree))
+    yield keyname
 
 
 @pytest.fixture
@@ -25,6 +59,8 @@ def configure_loader_modules(minion_opts):
                 "file.replace": file.replace,
                 "file.append": file.append,
                 "file.grep": file.grep,
+                "cp.cache_file": cp.cache_file,
+                "config.get": config.get,
             },
             "__opts__": minion_opts,
         },
@@ -34,6 +70,13 @@ def configure_loader_modules(minion_opts):
                 "files.is_text": salt.utils.files.is_text,
                 "stringutils.get_diff": salt.utils.stringutils.get_diff,
             },
+            "__opts__": minion_opts,
+        },
+        gpg: {},
+        cp: {
+            "__opts__": minion_opts,
+        },
+        config: {
             "__opts__": minion_opts,
         },
     }
@@ -102,6 +145,9 @@ def test_list_repos():
             assert check_repo["comps"] in check_repo["line"]
 
 
+@pytest.mark.skipif(
+    not os.path.isfile("/etc/apt/sources.list"), reason="Missing /etc/apt/sources.list"
+)
 def test_get_repos():
     """
     Test aptpkg.get_repos
@@ -118,6 +164,9 @@ def test_get_repos():
     assert ret["file"] == "/etc/apt/sources.list"
 
 
+@pytest.mark.skipif(
+    not os.path.isfile("/etc/apt/sources.list"), reason="Missing /etc/apt/sources.list"
+)
 def test_get_repos_multiple_comps():
     """
     Test aptpkg.get_repos when multiple comps
@@ -162,6 +211,9 @@ def test_del_repo(revert_repo_file):
     assert "Repo {} doesn't exist".format(test_repo) in exc.value.message
 
 
+@pytest.mark.skipif(
+    not os.path.isfile("/etc/apt/sources.list"), reason="Missing /etc/apt/sources.list"
+)
 def test_expand_repo_def():
     """
     Test aptpkg.expand_repo_def when the repo exists.
@@ -216,3 +268,68 @@ def test_mod_repo_no_file(tmp_path, revert_repo_file):
     assert test_repo.split()[1] in ret.strip()
     for comp in comps:
         assert comp in ret
+
+
+@pytest.fixture()
+def add_key(request, get_key_file):
+    """ """
+    key = Key(request.param)
+    key.add_key()
+    yield request.param
+    key.del_key()
+
+
+@pytest.mark.parametrize("get_key_file", KEY_FILES, indirect=True)
+@pytest.mark.parametrize("add_key", [False, True], indirect=True)
+@pytest.mark.destructive_test
+def test_get_repo_keys(get_key_file, add_key):
+    """
+    Test aptpkg.get_repo_keys when aptkey is False and True
+    """
+    ret = aptpkg.get_repo_keys(aptkey=add_key)
+    assert (
+        ret["0E08A149DE57BFBE"]["uid"]
+        == "SaltStack Packaging Team <packaging@saltstack.com>"
+    )
+
+
+@pytest.mark.parametrize("key", [False, True])
+@pytest.mark.destructive_test
+def test_get_repo_keys_keydir_not_exist(key):
+    """
+    Test aptpkg.get_repo_keys when aptkey is False and True
+    and keydir does not exist
+    """
+    ret = aptpkg.get_repo_keys(aptkey=key, keydir="/doesnotexist/")
+    if not key:
+        assert not ret
+    else:
+        assert ret
+
+
+@pytest.mark.parametrize("get_key_file", KEY_FILES, indirect=True)
+@pytest.mark.parametrize("aptkey", [False, True])
+def test_add_del_repo_key(get_key_file, aptkey):
+    """
+    Test both add_repo_key and del_repo_key when
+    aptkey is both False and True
+    and using both binary and armored gpg keys
+    """
+    try:
+        assert aptpkg.add_repo_key("salt://{}".format(get_key_file), aptkey=aptkey)
+        keyfile = pathlib.Path("/etc", "apt", "keyrings", get_key_file)
+        if not aptkey:
+            assert keyfile.is_file()
+            assert oct(keyfile.stat().st_mode)[-3:] == "644"
+            assert keyfile.read_bytes()
+        query_key = aptpkg.get_repo_keys(aptkey=aptkey)
+        assert (
+            query_key["0E08A149DE57BFBE"]["uid"]
+            == "SaltStack Packaging Team <packaging@saltstack.com>"
+        )
+    finally:
+        aptpkg.del_repo_key(keyid="0E08A149DE57BFBE", aptkey=aptkey)
+        if not aptkey:
+            assert not keyfile.is_file()
+        query_key = aptpkg.get_repo_keys(aptkey=aptkey)
+        assert "0E08A149DE57BFBE" not in query_key

@@ -8,10 +8,8 @@ Nox configuration script
 
 
 import datetime
-import glob
 import os
 import pathlib
-import shutil
 import sys
 import tempfile
 
@@ -127,29 +125,6 @@ def _get_session_python_version_info(session):
     return version_info
 
 
-def _get_session_python_site_packages_dir(session):
-    try:
-        site_packages_dir = session._runner._site_packages_dir
-    except AttributeError:
-        old_install_only_value = session._runner.global_config.install_only
-        try:
-            # Force install only to be false for the following chunk of code
-            # For additional information as to why see:
-            #   https://github.com/theacodes/nox/pull/181
-            session._runner.global_config.install_only = False
-            site_packages_dir = session.run(
-                "python",
-                "-c",
-                "import sys; from distutils.sysconfig import get_python_lib; sys.stdout.write(get_python_lib())",
-                silent=True,
-                log=False,
-            )
-            session._runner._site_packages_dir = site_packages_dir
-        finally:
-            session._runner.global_config.install_only = old_install_only_value
-    return site_packages_dir
-
-
 def _get_pydir(session):
     version_info = _get_session_python_version_info(session)
     if version_info < (3, 5):
@@ -157,36 +132,6 @@ def _get_pydir(session):
     if IS_WINDOWS and version_info < (3, 6):
         session.error("Only Python >= 3.6 is supported on Windows")
     return "py{}.{}".format(*version_info)
-
-
-def _install_system_packages(session):
-    """
-    Because some python packages are provided by the distribution and cannot
-    be pip installed, and because we don't want the whole system python packages
-    on our virtualenvs, we copy the required system python packages into
-    the virtualenv
-    """
-    version_info = _get_session_python_version_info(session)
-    py_version_keys = ["{}".format(*version_info), "{}.{}".format(*version_info)]
-    session_site_packages_dir = _get_session_python_site_packages_dir(session)
-    session_site_packages_dir = os.path.relpath(
-        session_site_packages_dir, str(REPO_ROOT)
-    )
-    for py_version in py_version_keys:
-        dist_packages_path = "/usr/lib/python{}/dist-packages".format(py_version)
-        if not os.path.isdir(dist_packages_path):
-            continue
-        for aptpkg in glob.glob(os.path.join(dist_packages_path, "*apt*")):
-            src = os.path.realpath(aptpkg)
-            dst = os.path.join(session_site_packages_dir, os.path.basename(src))
-            if os.path.exists(dst):
-                session.log("Not overwritting already existing %s with %s", dst, src)
-                continue
-            session.log("Copying %s into %s", src, dst)
-            if os.path.isdir(src):
-                shutil.copytree(src, dst)
-            else:
-                shutil.copyfile(src, dst)
 
 
 def _get_pip_requirements_file(session, transport, crypto=None, requirements_type="ci"):
@@ -260,7 +205,6 @@ def _get_pip_requirements_file(session, transport, crypto=None, requirements_typ
             return _requirements_file
         session.error("Could not find a freebsd requirements file for {}".format(pydir))
     else:
-        _install_system_packages(session)
         if crypto is None:
             _requirements_file = os.path.join(
                 "requirements",
@@ -382,7 +326,7 @@ def _run_with_coverage(session, *test_cmd, env=None):
             # Instruct sub processes to also run under coverage
             "COVERAGE_PROCESS_START": str(REPO_ROOT / ".coveragerc"),
         },
-        **coverage_base_env
+        **coverage_base_env,
     )
 
     try:
@@ -569,13 +513,6 @@ def pytest_parametrized(session, coverage, transport, crypto):
             session.install(*install_command, silent=PIP_INSTALL_SILENT)
 
     cmd_args = [
-        "--rootdir",
-        str(REPO_ROOT),
-        "--log-file={}".format(RUNTESTS_LOGFILE),
-        "--log-file-level=debug",
-        "--show-capture=no",
-        "-ra",
-        "-s",
         "--transport={}".format(transport),
     ] + session.posargs
     _pytest(session, coverage, cmd_args)
@@ -755,13 +692,6 @@ def pytest_cloud(session, coverage):
         session.install(*install_command, silent=PIP_INSTALL_SILENT)
 
     cmd_args = [
-        "--rootdir",
-        str(REPO_ROOT),
-        "--log-file={}".format(RUNTESTS_LOGFILE),
-        "--log-file-level=debug",
-        "--show-capture=no",
-        "-ra",
-        "-s",
         "--run-expensive",
         "-k",
         "cloud",
@@ -784,17 +714,7 @@ def pytest_tornado(session, coverage):
         session.install(
             "--progress-bar=off", "pyzmq==17.0.0", silent=PIP_INSTALL_SILENT
         )
-
-    cmd_args = [
-        "--rootdir",
-        str(REPO_ROOT),
-        "--log-file={}".format(RUNTESTS_LOGFILE),
-        "--log-file-level=debug",
-        "--show-capture=no",
-        "-ra",
-        "-s",
-    ] + session.posargs
-    _pytest(session, coverage, cmd_args)
+    _pytest(session, coverage, session.posargs)
 
 
 def _pytest(session, coverage, cmd_args):
@@ -802,62 +722,41 @@ def _pytest(session, coverage, cmd_args):
     _create_ci_directories()
 
     env = {"CI_RUN": "1" if CI_RUN else "0"}
-    if IS_DARWIN:
-        # Don't nuke our multiprocessing efforts objc!
-        # https://stackoverflow.com/questions/50168647/multiprocessing-causes-python-to-crash-and-gives-an-error-may-have-been-in-progr
-        env["OBJC_DISABLE_INITIALIZE_FORK_SAFETY"] = "YES"
+
+    args = [
+        "--rootdir",
+        str(REPO_ROOT),
+        "--log-file={}".format(RUNTESTS_LOGFILE),
+        "--log-file-level=debug",
+        "--show-capture=no",
+        "-ra",
+        "-s",
+        "--showlocals",
+    ]
+    args.extend(cmd_args)
 
     if CI_RUN:
         # We'll print out the collected tests on CI runs.
         # This will show a full list of what tests are going to run, in the right order, which, in case
         # of a test suite hang, helps us pinpoint which test is hanging
         session.run(
-            "python", "-m", "pytest", *(cmd_args + ["--collect-only", "-qqq"]), env=env
+            "python", "-m", "pytest", *(args + ["--collect-only", "-qqq"]), env=env
         )
 
-    try:
-        if coverage is True:
-            _run_with_coverage(
-                session,
-                "python",
-                "-m",
-                "coverage",
-                "run",
-                "-m",
-                "pytest",
-                "--showlocals",
-                *cmd_args,
-                env=env
-            )
-        else:
-            session.run("python", "-m", "pytest", *cmd_args, env=env)
-    except CommandFailed:  # pylint: disable=try-except-raise
-        # Not rerunning failed tests for now
-        raise
-
-        # pylint: disable=unreachable
-        # Re-run failed tests
-        session.log("Re-running failed tests")
-
-        for idx, parg in enumerate(cmd_args):
-            if parg.startswith("--junitxml="):
-                cmd_args[idx] = parg.replace(".xml", "-rerun-failed.xml")
-        cmd_args.append("--lf")
-        if coverage is True:
-            _run_with_coverage(
-                session,
-                "python",
-                "-m",
-                "coverage",
-                "run",
-                "-m",
-                "pytest",
-                "--showlocals",
-                *cmd_args
-            )
-        else:
-            session.run("python", "-m", "pytest", *cmd_args, env=env)
-        # pylint: enable=unreachable
+    if coverage is True:
+        _run_with_coverage(
+            session,
+            "python",
+            "-m",
+            "coverage",
+            "run",
+            "-m",
+            "pytest",
+            *args,
+            env=env,
+        )
+    else:
+        session.run("python", "-m", "pytest", *args, env=env)
 
 
 class Tee:
@@ -1128,7 +1027,8 @@ def invoke(session):
 
 @nox.session(name="changelog", python="3")
 @nox.parametrize("draft", [False, True])
-def changelog(session, draft):
+@nox.parametrize("force", [False, True])
+def changelog(session, draft, force):
     """
     Generate salt's changelog
     """
@@ -1142,4 +1042,7 @@ def changelog(session, draft):
     town_cmd = ["towncrier", "--version={}".format(session.posargs[0])]
     if draft:
         town_cmd.append("--draft")
+    if force:
+        # Do not ask, just remove news fragments
+        town_cmd.append("--yes")
     session.run(*town_cmd)

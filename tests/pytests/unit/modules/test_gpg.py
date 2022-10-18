@@ -15,12 +15,12 @@ import pytest
 import salt.modules.gpg as gpg
 from salt.exceptions import SaltInvocationError
 from tests.support.mock import MagicMock, patch
-from tests.support.pytest.helpers import EntropyGenerator
 
 pytest.importorskip("gnupg")
 
 pytestmark = [
     pytest.mark.skip_unless_on_linux,
+    pytest.mark.requires_random_entropy,
 ]
 
 log = logging.getLogger(__name__)
@@ -157,16 +157,11 @@ OZV2Hg+93dg3Wi6g/JW4OuTKWKuHRqpRB1J4i4lO
 """
 
 
-@pytest.fixture(autouse=True)
-def entropy_generation():
-    with EntropyGenerator():
-        yield
-
-
 @pytest.fixture
 def gpghome(tmp_path):
     root = tmp_path / "gpghome"
     root.mkdir(mode=0o0700)
+    root.joinpath(".gnupg").mkdir(mode=0o0700)
     pub = root / "gpgfile.pub"
     pub.write_text(GPG_TEST_PUB_KEY)
     priv = root / "gpgfile.priv"

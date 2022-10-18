@@ -11,6 +11,7 @@ import os
 import platform
 import random
 import re
+import shutil
 import socket
 import subprocess
 import types
@@ -1006,10 +1007,10 @@ def _junos_interfaces_ifconfig(out):
 
     pip = re.compile(
         r".*?inet\s*(primary)*\s+mtu"
-        r" (\d+)\s+local=[^\d]*(.*?)\s+dest=[^\d]*(.*?)\/([\d]*)\s+bcast=((?:[0-9]{1,3}\.){3}[0-9]{1,3})"
+        r" (\d+)\s+local=[^\d]*(.*?)\s{0,40}dest=[^\d]*(.*?)\/([\d]*)\s{0,40}bcast=((?:[0-9]{1,3}\.){3}[0-9]{1,3})"
     )
     pip6 = re.compile(
-        r".*?inet6 mtu [^\d]+\s+local=([0-9a-f:]+)%([a-zA-Z0-9]*)/([\d]*)\s"
+        r".*?inet6 mtu [^\d]+\s{0,40}local=([0-9a-f:]+)%([a-zA-Z0-9]*)/([\d]*)\s"
     )
 
     pupdown = re.compile("UP")
@@ -1722,8 +1723,13 @@ def _netlink_tool_remote_on(port, which_end):
         elif "ESTAB" not in line:
             continue
         chunks = line.split()
+        local_host, local_port = chunks[3].rsplit(":", 1)
         remote_host, remote_port = chunks[4].rsplit(":", 1)
 
+        if which_end == "remote_port" and int(remote_port) != int(port):
+            continue
+        if which_end == "local_port" and int(local_port) != int(port):
+            continue
         remotes.add(remote_host.strip("[]"))
 
     if valid is False:
@@ -1991,11 +1997,14 @@ def _linux_remotes_on(port, which_end):
 
     """
     remotes = set()
+    lsof_binary = shutil.which("lsof")
+    if lsof_binary is None:
+        return remotes
 
     try:
         data = subprocess.check_output(
             [
-                "lsof",
+                lsof_binary,
                 "-iTCP:{:d}".format(port),
                 "-n",
                 "-P",
@@ -2203,11 +2212,7 @@ def dns_check(addr, port, safe=False, ipv6=None):
     if not ip_addrs:
         err = "DNS lookup or connection check of '{}' failed.".format(addr)
         if safe:
-            if salt.log.is_console_configured():
-                # If logging is not configured it also means that either
-                # the master or minion instance calling this hasn't even
-                # started running
-                log.error(err)
+            log.error(err)
             raise SaltClientError()
         raise SaltSystemExit(code=42, msg=err)
 
