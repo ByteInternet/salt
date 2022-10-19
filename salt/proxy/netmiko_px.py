@@ -192,14 +192,11 @@ try:
     from netmiko import ConnectHandler
 
     try:
-        from netmiko import (
-            NetMikoAuthenticationException,
-            NetMikoTimeoutException,
-        )
+        from netmiko import NetMikoAuthenticationException, NetMikoTimeoutException
     except ImportError:
         from netmiko.ssh_exception import (
-            NetMikoTimeoutException,
             NetMikoAuthenticationException,
+            NetMikoTimeoutException,
         )
 
     HAS_NETMIKO = True

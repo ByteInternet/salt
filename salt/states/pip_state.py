@@ -103,9 +103,9 @@ if HAS_PIP is True:
 
         purge_pip.__pip_ver__ = pip.__version__
     if salt.utils.versions.compare(ver1=pip.__version__, oper=">=", ver2="10.0"):
-        from pip._internal.exceptions import (
+        from pip._internal.exceptions import (  # pylint: disable=E0611,E0401
             InstallationError,
-        )  # pylint: disable=E0611,E0401
+        )
     elif salt.utils.versions.compare(ver1=pip.__version__, oper=">=", ver2="1.0"):
         from pip.exceptions import InstallationError  # pylint: disable=E0611,E0401
     else:
@@ -565,11 +565,6 @@ def installed(
     process_dependency_links
         Enable the processing of dependency links
 
-    bin_env : None
-        Absolute path to a virtual environment directory or absolute path to
-        a pip executable. The example below assumes a virtual environment
-        has been created at ``/foo/.virtualenvs/bar``.
-
     env_vars
         Add or modify environment variables. Useful for tweaking build steps,
         such as specifying INCLUDE or LIBRARY paths in Makefiles, build scripts or
@@ -593,29 +588,34 @@ def installed(
         Mark this host as trusted, even though it does not have valid or any
         HTTPS.
 
-    Example:
+    bin_env : None
+        Absolute path to a virtual environment directory or absolute path to
+        a pip executable. The example below assumes a virtual environment
+        has been created at ``/foo/.virtualenvs/bar``.
 
-    .. code-block:: yaml
+        Example:
 
-        django:
-          pip.installed:
-            - name: django >= 1.6, <= 1.7
-            - bin_env: /foo/.virtualenvs/bar
-            - require:
-              - pkg: python-pip
+        .. code-block:: yaml
 
-    Or
+            django:
+            pip.installed:
+                - name: django >= 1.6, <= 1.7
+                - bin_env: /foo/.virtualenvs/bar
+                - require:
+                - pkg: python-pip
 
-    Example:
+        Or
 
-    .. code-block:: yaml
+        Example:
 
-        django:
-          pip.installed:
-            - name: django >= 1.6, <= 1.7
-            - bin_env: /foo/.virtualenvs/bar/bin/pip
-            - require:
-              - pkg: python-pip
+        .. code-block:: yaml
+
+            django:
+            pip.installed:
+                - name: django >= 1.6, <= 1.7
+                - bin_env: /foo/.virtualenvs/bar/bin/pip
+                - require:
+                - pkg: python-pip
 
     .. admonition:: Attention
 

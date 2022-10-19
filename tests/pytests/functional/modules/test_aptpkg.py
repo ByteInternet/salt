@@ -3,6 +3,7 @@ import pathlib
 import shutil
 
 import pytest
+
 import salt.exceptions
 import salt.modules.aptpkg as aptpkg
 import salt.modules.cmdmod as cmd
@@ -104,18 +105,24 @@ def get_current_repo(multiple_comps=False):
         Search for a repo that contains multiple comps.
         For example: main, restricted
     """
-    with salt.utils.files.fopen("/etc/apt/sources.list") as fp:
-        for line in fp:
-            if line.startswith("#"):
-                continue
-            if "ubuntu.com" in line or "debian.org" in line:
-                test_repo = line.strip()
-                comps = test_repo.split()[3:]
-                if multiple_comps:
-                    if len(comps) > 1:
+    test_repo = None
+    try:
+        with salt.utils.files.fopen("/etc/apt/sources.list") as fp:
+            for line in fp:
+                if line.startswith("#"):
+                    continue
+                if "ubuntu.com" in line or "debian.org" in line:
+                    test_repo = line.strip()
+                    comps = test_repo.split()[3:]
+                    if multiple_comps:
+                        if len(comps) > 1:
+                            break
+                    else:
                         break
-                else:
-                    break
+    except FileNotFoundError as error:
+        pytest.skip("Missing {}".format(error.filename))
+    if not test_repo:
+        pytest.skip("Did not detect an APT repo")
     return test_repo, comps
 
 
@@ -145,16 +152,11 @@ def test_list_repos():
             assert check_repo["comps"] in check_repo["line"]
 
 
-@pytest.mark.skipif(
-    not os.path.isfile("/etc/apt/sources.list"), reason="Missing /etc/apt/sources.list"
-)
 def test_get_repos():
     """
     Test aptpkg.get_repos
     """
     test_repo, comps = get_current_repo()
-    if not test_repo:
-        pytest.skip("Did not detect an apt repo")
     exp_ret = test_repo.split()
     ret = aptpkg.get_repo(repo=test_repo)
     assert ret["type"] == exp_ret[0]
@@ -164,17 +166,12 @@ def test_get_repos():
     assert ret["file"] == "/etc/apt/sources.list"
 
 
-@pytest.mark.skipif(
-    not os.path.isfile("/etc/apt/sources.list"), reason="Missing /etc/apt/sources.list"
-)
 def test_get_repos_multiple_comps():
     """
     Test aptpkg.get_repos when multiple comps
     exist in repo.
     """
     test_repo, comps = get_current_repo(multiple_comps=True)
-    if not test_repo:
-        pytest.skip("Did not detect an ubuntu repo")
     exp_ret = test_repo.split()
     ret = aptpkg.get_repo(repo=test_repo)
     assert ret["type"] == exp_ret[0]
@@ -214,12 +211,16 @@ def test_del_repo(revert_repo_file):
 @pytest.mark.skipif(
     not os.path.isfile("/etc/apt/sources.list"), reason="Missing /etc/apt/sources.list"
 )
-def test_expand_repo_def():
+def test__expand_repo_def(grains):
     """
-    Test aptpkg.expand_repo_def when the repo exists.
+    Test aptpkg._expand_repo_def when the repo exists.
     """
     test_repo, comps = get_current_repo()
-    ret = aptpkg.expand_repo_def(repo=test_repo)
+    ret = aptpkg._expand_repo_def(
+        os_name=grains["os"],
+        lsb_distrib_codename=grains.get("lsb_distrib_codename"),
+        repo=test_repo,
+    )
     for key in [
         "comps",
         "dist",

@@ -14,6 +14,7 @@ import pathlib
 import textwrap
 
 import pytest
+
 import salt.modules.aptpkg as aptpkg
 import salt.modules.pkg_resource as pkg_resource
 import salt.utils.path
@@ -961,15 +962,17 @@ def test_list_repos():
                 assert repos[source_uri][0]["uri"][-1] == "/"
 
 
-def test_expand_repo_def():
+def test__expand_repo_def():
     """
-    Checks results from expand_repo_def
+    Checks results from _expand_repo_def
     """
     source_file = "/etc/apt/sources.list"
 
     # Valid source
     repo = "deb http://cdn-aws.deb.debian.org/debian/ stretch main\n"
-    sanitized = aptpkg.expand_repo_def(repo=repo, file=source_file)
+    sanitized = aptpkg._expand_repo_def(
+        os_name="debian", lsb_distrib_codename="stretch", repo=repo, file=source_file
+    )
 
     assert isinstance(sanitized, dict)
     assert "uri" in sanitized
@@ -979,8 +982,51 @@ def test_expand_repo_def():
 
     # Pass the architecture and make sure it is added the the line attribute
     repo = "deb http://cdn-aws.deb.debian.org/debian/ stretch main\n"
-    sanitized = aptpkg.expand_repo_def(
-        repo=repo, file=source_file, architectures="amd64"
+    sanitized = aptpkg._expand_repo_def(
+        os_name="debian",
+        lsb_distrib_codename="stretch",
+        repo=repo,
+        file=source_file,
+        architectures="amd64",
+    )
+
+    # Make sure line is in the dict
+    assert isinstance(sanitized, dict)
+    assert "line" in sanitized
+
+    # Make sure the architecture is in line
+    assert (
+        sanitized["line"]
+        == "deb [arch=amd64] http://cdn-aws.deb.debian.org/debian/ stretch main"
+    )
+
+
+def test__expand_repo_def_cdrom():
+    """
+    Checks results from _expand_repo_def
+    """
+    source_file = "/etc/apt/sources.list"
+
+    # Valid source
+    repo = "# deb cdrom:[Debian GNU/Linux 11.4.0 _Bullseye_ - Official amd64 NETINST 20220709-10:31]/ bullseye main\n"
+    sanitized = aptpkg._expand_repo_def(
+        os_name="debian", lsb_distrib_codename="bullseye", repo=repo, file=source_file
+    )
+
+    assert isinstance(sanitized, dict)
+    assert "uri" in sanitized
+
+    # Make sure last character in of the URI is still a /
+    assert sanitized["uri"][-1] == "/"
+
+    # Pass the architecture and make sure it is added the the line attribute
+    repo = "deb http://cdn-aws.deb.debian.org/debian/ stretch main\n"
+    sanitized = aptpkg._expand_repo_def(
+        os_name="debian",
+        lsb_distrib_codename="stretch",
+        repo=repo,
+        file=source_file,
+        architectures="amd64",
     )
 
     # Make sure line is in the dict
@@ -1002,7 +1048,7 @@ def test_expand_repo_def_cdrom():
 
     # Valid source
     repo = "# deb cdrom:[Debian GNU/Linux 11.4.0 _Bullseye_ - Official amd64 NETINST 20220709-10:31]/ bullseye main\n"
-    sanitized = aptpkg.expand_repo_def(repo=repo, file=source_file)
+    sanitized = aptpkg.expand_repo_def(os_name="debian", repo=repo, file=source_file)
     log.warning("SAN: %s", sanitized)
 
     assert isinstance(sanitized, dict)
@@ -1014,7 +1060,7 @@ def test_expand_repo_def_cdrom():
     # Pass the architecture and make sure it is added the the line attribute
     repo = "deb http://cdn-aws.deb.debian.org/debian/ stretch main\n"
     sanitized = aptpkg.expand_repo_def(
-        repo=repo, file=source_file, architectures="amd64"
+        os_name="debian", repo=repo, file=source_file, architectures="amd64"
     )
 
     # Make sure line is in the dict

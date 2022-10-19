@@ -444,12 +444,13 @@ def _run(
         # Ensure environment is correct for a newly logged-in user by running
         # the command under bash as a login shell
         try:
-            user_shell = __salt__["user.info"](runas)["shell"]
+            # Do not rely on populated __salt__ dict (ie avoid __salt__['user.info'])
+            user_shell = [x for x in pwd.getpwall() if x.pw_name == runas][0].pw_shell
             if re.search("bash$", user_shell):
                 cmd = "{shell} -l -c {cmd}".format(
                     shell=user_shell, cmd=_cmd_quote(cmd)
                 )
-        except KeyError:
+        except (AttributeError, IndexError):
             pass
 
         # Ensure the login is simulated correctly (note: su runs sh, not bash,
@@ -932,6 +933,7 @@ def _run_quiet(
     success_retcodes=None,
     success_stdout=None,
     success_stderr=None,
+    ignore_retcode=None,
 ):
     """
     Helper for running commands quietly for minion startup
@@ -958,6 +960,7 @@ def _run_quiet(
         success_retcodes=success_retcodes,
         success_stdout=success_stdout,
         success_stderr=success_stderr,
+        ignore_retcode=ignore_retcode,
     )["stdout"]
 
 
@@ -980,6 +983,7 @@ def _run_all_quiet(
     success_retcodes=None,
     success_stdout=None,
     success_stderr=None,
+    ignore_retcode=None,
 ):
 
     """
@@ -1012,6 +1016,7 @@ def _run_all_quiet(
         success_retcodes=success_retcodes,
         success_stdout=success_stdout,
         success_stderr=success_stderr,
+        ignore_retcode=ignore_retcode,
     )
 
 
