@@ -237,7 +237,7 @@ from salt.exceptions import (
     SaltCloudExecutionTimeout,
     SaltCloudSystemExit,
 )
-from salt.utils.versions import Version
+from salt.utils.versions import Version, cloud
 
 try:
     import os_client_config
@@ -443,9 +443,9 @@ def _get_ips(node, addr_type="public"):
                 "OS-EXT-IPS:type"
             ):
                 ret.append(addr["addr"])
-            elif addr_type == "public" and salt.utils.cloud.is_public_ip(addr["addr"]):
+            elif addr_type == "public" and cloud.is_public_ip(addr["addr"]):
                 ret.append(addr["addr"])
-            elif addr_type == "private" and not salt.utils.cloud.is_public_ip(
+            elif addr_type == "private" and not cloud.is_public_ip(
                 addr["addr"]
             ):
                 ret.append(addr["addr"])
