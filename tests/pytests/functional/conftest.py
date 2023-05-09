@@ -1,5 +1,4 @@
 import logging
-import pathlib
 import shutil
 
 import pytest
@@ -10,7 +9,7 @@ log = logging.getLogger(__name__)
 
 @pytest.fixture(scope="package")
 def minion_id():
-    return "func-tests-minion"
+    return "func-tests-minion-opts"
 
 
 @pytest.fixture(scope="module")
@@ -43,8 +42,8 @@ def minion_config_defaults():
 @pytest.fixture(scope="module")
 def minion_config_overrides():
     """
-    Functional test modules can provide this fixture to tweak the configuration overrides dictionary
-    passed to the minion factory
+    Functional test modules can provide this fixture to tweak the configuration
+    overrides dictionary passed to the minion factory
     """
     return {}
 
@@ -61,8 +60,14 @@ def minion_opts(
     minion_config_overrides.update(
         {
             "file_client": "local",
-            "file_roots": {"base": [str(state_tree)], "prod": [str(state_tree_prod)]},
-            "features": {"enable_slsvars_fixes": True},
+            "file_roots": {
+                "base": [
+                    str(state_tree),
+                ],
+                "prod": [
+                    str(state_tree_prod),
+                ],
+            },
         }
     )
     factory = salt_factories.salt_minion_daemon(
@@ -74,17 +79,59 @@ def minion_opts(
 
 
 @pytest.fixture(scope="module")
+def master_config_defaults():
+    """
+    Functional test modules can provide this fixture to tweak the default configuration dictionary
+    passed to the master factory
+    """
+    return {}
+
+
+@pytest.fixture(scope="module")
+def master_config_overrides():
+    """
+    Functional test modules can provide this fixture to tweak the configuration
+    overrides dictionary passed to the master factory
+    """
+    return {}
+
+
+@pytest.fixture(scope="module")
+def master_opts(
+    salt_factories,
+    state_tree,
+    state_tree_prod,
+    master_config_defaults,
+    master_config_overrides,
+):
+    master_config_overrides.update(
+        {
+            "file_client": "local",
+            "file_roots": {
+                "base": [
+                    str(state_tree),
+                ],
+                "prod": [
+                    str(state_tree_prod),
+                ],
+            },
+        }
+    )
+    factory = salt_factories.salt_master_daemon(
+        "func-tests-master-opts",
+        defaults=master_config_defaults or None,
+        overrides=master_config_overrides,
+    )
+    return factory.config.copy()
+
+
+@pytest.fixture(scope="module")
 def loaders(minion_opts):
-    return Loaders(minion_opts)
+    return Loaders(minion_opts, loaded_base_name="{}.loaded".format(__name__))
 
 
 @pytest.fixture(autouse=True)
 def reset_loaders_state(loaders):
-    # Delete the files cache after each test
-    cachedir = pathlib.Path(loaders.opts["cachedir"])
-    shutil.rmtree(str(cachedir), ignore_errors=True)
-    cachedir.mkdir(parents=True, exist_ok=True)
-    # The above can be deleted after pytest-salt-factories>=1.0.0rc7 has been merged
     try:
         # Run the tests
         yield

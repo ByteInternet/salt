@@ -8,8 +8,18 @@ import platform
 import subprocess
 import sys
 
-from distro import linux_distribution
+import distro
+
 from salt.utils.decorators import memoize as real_memoize
+
+
+def linux_distribution(full_distribution_name=True):
+    """
+    Simple function to return information about the OS distribution (id_name, version, codename).
+    """
+    if full_distribution_name:
+        return distro.name(), distro.version(best=True), distro.codename()
+    return distro.id(), distro.version(best=True), distro.codename()
 
 
 @real_memoize
@@ -217,5 +227,6 @@ def spawning_platform():
     Returns True if multiprocessing.get_start_method(allow_none=False) returns "spawn"
 
     This is the default for Windows Python >= 3.4 and macOS on Python >= 3.8.
+    Salt, however, will force macOS to spawning by default on all python versions
     """
     return multiprocessing.get_start_method(allow_none=False) == "spawn"

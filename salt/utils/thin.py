@@ -17,7 +17,11 @@ import zipfile
 
 import distro
 import jinja2
+import looseversion
 import msgpack
+import packaging
+import yaml
+
 import salt
 import salt.exceptions
 import salt.ext.tornado as tornado
@@ -27,7 +31,6 @@ import salt.utils.json
 import salt.utils.path
 import salt.utils.stringutils
 import salt.version
-import yaml
 
 # This is needed until we drop support for python 3.6
 has_immutables = False
@@ -278,6 +281,8 @@ def get_tops_python(py_ver, exclude=None, ext_py_ver=None):
         "ssl_match_hostname",
         "markupsafe",
         "backports_abc",
+        "looseversion",
+        "packaging",
     ]
     if ext_py_ver and tuple(ext_py_ver) >= (3, 0):
         mods.append("distro")
@@ -425,6 +430,8 @@ def get_tops(extra_mods="", so_mods=""):
         ssl_match_hostname,
         markupsafe,
         backports_abc,
+        looseversion,
+        packaging,
     ]
     modules = find_site_modules("contextvars")
     if modules:
@@ -899,7 +906,6 @@ def gen_min(
         "salt/client/__init__.py",
         "salt/ext",
         "salt/ext/__init__.py",
-        "salt/ext/six.py",
         "salt/ext/ipaddress.py",
         "salt/version.py",
         "salt/syspaths.py",
@@ -920,12 +926,12 @@ def gen_min(
         "salt/pillar",
         "salt/pillar/__init__.py",
         "salt/utils/textformat.py",
-        "salt/log",
-        "salt/log/__init__.py",
-        "salt/log/handlers",
-        "salt/log/handlers/__init__.py",
-        "salt/log/mixins.py",
-        "salt/log/setup.py",
+        "salt/log_handlers",
+        "salt/log_handlers/__init__.py",
+        "salt/_logging/__init__.py",
+        "salt/_logging/handlers.py",
+        "salt/_logging/impl.py",
+        "salt/_logging/mixins.py",
         "salt/cli",
         "salt/cli/__init__.py",
         "salt/cli/caller.py",

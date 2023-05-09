@@ -231,23 +231,22 @@ import pprint
 import socket
 
 import salt.config as config
-import salt.utils.versions
 from salt.exceptions import (
     SaltCloudConfigError,
     SaltCloudExecutionFailure,
     SaltCloudExecutionTimeout,
     SaltCloudSystemExit,
 )
+from salt.utils.versions import Version, cloud
 
 try:
-    import shade
-    import shade.openstackcloud
-    import shade.exc
     import os_client_config
+    import shade
+    import shade.exc
+    import shade.openstackcloud
 
     HAS_SHADE = (
-        salt.utils.versions._LooseVersion(shade.__version__)
-        >= salt.utils.versions._LooseVersion("1.19.0"),
+        Version(shade.__version__) >= Version("1.19.0"),
         "Please install newer version of shade: >= 1.19.0",
     )
 except ImportError:
@@ -444,11 +443,9 @@ def _get_ips(node, addr_type="public"):
                 "OS-EXT-IPS:type"
             ):
                 ret.append(addr["addr"])
-            elif addr_type == "public" and __utils__["cloud.is_public_ip"](
-                addr["addr"]
-            ):
+            elif addr_type == "public" and cloud.is_public_ip(addr["addr"]):
                 ret.append(addr["addr"])
-            elif addr_type == "private" and not __utils__["cloud.is_public_ip"](
+            elif addr_type == "private" and not cloud.is_public_ip(
                 addr["addr"]
             ):
                 ret.append(addr["addr"])

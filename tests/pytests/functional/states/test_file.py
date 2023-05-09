@@ -10,10 +10,11 @@ import sys
 from contextlib import closing
 
 import pytest
+
 import salt.utils.files
 
 
-class TestRequestHandler(http.server.SimpleHTTPRequestHandler):
+class RequestHandler(http.server.SimpleHTTPRequestHandler):
     """
     Modified request handler class
     """
@@ -72,7 +73,7 @@ def serve(port=8000, directory=None):
     """
     Function to serve a directory via http.server
     """
-    handler = functools.partial(TestRequestHandler, directory=directory)
+    handler = functools.partial(RequestHandler, directory=directory)
     s = http.server.HTTPServer(("127.0.0.1", port), handler)
     s.serve_forever()
 
@@ -112,6 +113,7 @@ def web_root(tmp_path_factory):
         shutil.rmtree(str(_web_root), ignore_errors=True)
 
 
+@pytest.mark.slow_test
 def test_file_managed_web_source_etag_operation(
     states, free_port, web_root, minion_opts
 ):

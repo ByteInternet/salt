@@ -10,6 +10,9 @@ import sys
 import threading
 from random import randint
 
+import zmq.error
+import zmq.eventloop.zmqstream
+
 import salt.ext.tornado
 import salt.ext.tornado.concurrent
 import salt.ext.tornado.gen
@@ -20,8 +23,6 @@ import salt.utils.files
 import salt.utils.process
 import salt.utils.stringutils
 import salt.utils.zeromq
-import zmq.error
-import zmq.eventloop.zmqstream
 from salt._compat import ipaddress
 from salt.exceptions import SaltException, SaltReqTimeoutError
 from salt.utils.zeromq import LIBZMQ_VERSION_INFO, ZMQ_VERSION_INFO, zmq
@@ -45,7 +46,7 @@ def _get_master_uri(master_ip, master_port, source_ip=None, source_port=None):
     rc = zmq_connect(socket, "tcp://192.168.1.17:5555;192.168.1.1:5555"); assert (rc == 0);
     Source: http://api.zeromq.org/4-1:zmq-tcp
     """
-    from salt.utils.zeromq import ip_bracket
+    from salt.utils.network import ip_bracket
 
     master_uri = "tcp://{master_ip}:{master_port}".format(
         master_ip=ip_bracket(master_ip), master_port=master_port
@@ -325,10 +326,12 @@ class RequestServer(salt.transport.base.DaemonizedRequestServer):
             )
 
         log.info("Setting up the master communication server")
-        log.error("ReqServer clients %s", self.uri)
+        log.info("ReqServer clients %s", self.uri)
         self.clients.bind(self.uri)
-        log.error("ReqServer workers %s", self.w_uri)
+        log.info("ReqServer workers %s", self.w_uri)
         self.workers.bind(self.w_uri)
+        if self.opts.get("ipc_mode", "") != "tcp":
+            os.chmod(os.path.join(self.opts["sock_dir"], "workers.ipc"), 0o600)
 
         while True:
             if self.clients.closed or self.workers.closed:
@@ -415,6 +418,10 @@ class RequestServer(salt.transport.base.DaemonizedRequestServer):
             )
         log.info("Worker binding to socket %s", self.w_uri)
         self._socket.connect(self.w_uri)
+        if self.opts.get("ipc_mode", "") != "tcp" and os.path.isfile(
+            os.path.join(self.opts["sock_dir"], "workers.ipc")
+        ):
+            os.chmod(os.path.join(self.opts["sock_dir"], "workers.ipc"), 0o600)
         self.stream = zmq.eventloop.zmqstream.ZMQStream(self._socket, io_loop=io_loop)
         self.message_handler = message_handler
         self.stream.on_recv_stream(self.handle_message)
@@ -538,13 +545,8 @@ class AsyncReqMessageClient:
                     self.socket = None
                 self.stream = None
             if self.context.closed is False:
+                # This hangs if closing the stream causes an import error
                 self.context.term()
-
-    # pylint: disable=W1701
-    def __del__(self):
-        self.close()
-
-    # pylint: enable=W1701
 
     def _init_socket(self):
         if hasattr(self, "stream"):
@@ -723,7 +725,7 @@ class PublishServer(salt.transport.base.DaemonizedPublishServer):
         try:
             pub_sock.setsockopt(zmq.HWM, self.opts.get("pub_hwm", 1000))
         # in zmq >= 3.0, there are separate send and receive HWM settings
-        except AttributeError:
+        except (AttributeError, zmq.error.ZMQError):
             # Set the High Water Marks. For more information on HWM, see:
             # http://api.zeromq.org/4-1:zmq-setsockopt
             pub_sock.setsockopt(zmq.SNDHWM, self.opts.get("pub_hwm", 1000))

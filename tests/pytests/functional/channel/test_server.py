@@ -1,21 +1,35 @@
+import ctypes
 import logging
+import multiprocessing
 import os
 import pathlib
 import shutil
+import stat
 import time
+from pathlib import Path
 
 import pytest
+from pytestshellutils.utils import ports
+from saltfactories.utils import random_string
+
 import salt.channel.client
 import salt.channel.server
 import salt.config
 import salt.ext.tornado.gen
 import salt.ext.tornado.ioloop
+import salt.master
 import salt.utils.platform
 import salt.utils.process
-from saltfactories.utils import random_string
-from saltfactories.utils.ports import get_unused_localhost_port
+import salt.utils.stringutils
 
 log = logging.getLogger(__name__)
+
+
+pytestmark = [
+    pytest.mark.skip_on_spawning_platform(
+        reason="These tests are currently broken on spawning platforms. Need to be rewritten.",
+    )
+]
 
 
 @pytest.fixture
@@ -53,8 +67,8 @@ def master_config(root_dir, transport):
     master_conf["root_dir"] = str(root_dir)
     master_conf["sock_dir"] = str(root_dir)
     master_conf["interface"] = "127.0.0.1"
-    master_conf["publish_port"] = get_unused_localhost_port()
-    master_conf["ret_port"] = get_unused_localhost_port()
+    master_conf["publish_port"] = ports.get_unused_localhost_port()
+    master_conf["ret_port"] = ports.get_unused_localhost_port()
     master_conf["pki_dir"] = str(root_dir / "pki")
     os.makedirs(master_conf["pki_dir"])
     salt.crypt.gen_keys(master_conf["pki_dir"], "master", 4096)
@@ -95,6 +109,21 @@ def process_manager():
         process_manager.terminate()
 
 
+@pytest.fixture
+def master_secrets():
+    salt.master.SMaster.secrets["aes"] = {
+        "secret": multiprocessing.Array(
+            ctypes.c_char,
+            salt.utils.stringutils.to_bytes(salt.crypt.Crypticle.generate_key_string()),
+        ),
+        "serial": multiprocessing.Value(
+            ctypes.c_longlong, lock=False  # We'll use the lock from 'secret'
+        ),
+    }
+    yield
+    salt.master.SMaster.secrets.pop("aes")
+
+
 @salt.ext.tornado.gen.coroutine
 def _connect_and_publish(
     io_loop, channel_minion_id, channel, server, received, timeout=60
@@ -117,7 +146,12 @@ def _connect_and_publish(
 
 
 def test_pub_server_channel(
-    io_loop, channel_minion_id, master_config, minion_config, process_manager
+    io_loop,
+    channel_minion_id,
+    master_config,
+    minion_config,
+    process_manager,
+    master_secrets,
 ):
     server_channel = salt.channel.server.PubServerChannel.factory(
         master_config,
@@ -130,6 +164,12 @@ def test_pub_server_channel(
         log.info("TEST - Req Server handle payload %r", payload)
 
     req_server_channel.post_fork(handle_payload, io_loop=io_loop)
+    if master_config["transport"] == "zeromq":
+        p = Path(str(master_config["sock_dir"])) / "workers.ipc"
+        mode = os.lstat(p).st_mode
+        assert bool(os.lstat(p).st_mode & stat.S_IRUSR)
+        assert not bool(os.lstat(p).st_mode & stat.S_IRGRP)
+        assert not bool(os.lstat(p).st_mode & stat.S_IROTH)
 
     pub_channel = salt.channel.client.AsyncPubChannel.factory(minion_config)
     received = []

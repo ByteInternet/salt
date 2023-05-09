@@ -2,15 +2,14 @@ import logging
 import time
 
 import pytest
-from saltfactories.exceptions import FactoryNotStarted
+from pytestshellutils.exceptions import FactoryNotStarted
 
 log = logging.getLogger(__name__)
 
 ECHO_STR = "The FitnessGram Pacer Test is a multistage aerobic capacity test"
 
 pytestmark = [
-    pytest.mark.slow_test,
-    pytest.mark.windows_whitelisted,
+    pytest.mark.core_test,
 ]
 
 

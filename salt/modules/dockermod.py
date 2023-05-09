@@ -344,7 +344,12 @@ def _get_docker_py_versioninfo():
     try:
         return docker.version_info
     except AttributeError:
-        pass
+        # docker 6.0.0+ exposes version from __version__ attribute
+        try:
+            docker_version = docker.__version__.split(".")
+            return tuple(int(n) for n in docker_version)
+        except AttributeError:
+            pass
 
 
 def _get_client(timeout=NOTSET, **kwargs):
@@ -1328,6 +1333,17 @@ def compare_networks(first, second, ignore="Name,Id,Created,Containers"):
                         }
                 elif subval1 != subval2:
                     ret.setdefault("IPAM", {})[subkey] = {
+                        "old": subval1,
+                        "new": subval2,
+                    }
+        elif item == "Options":
+            for subkey in val1:
+                subval1 = val1[subkey]
+                subval2 = val2.get(subkey)
+                if subkey == "com.docker.network.bridge.name":
+                    continue
+                elif subval1 != subval2:
+                    ret.setdefault("Options", {})[subkey] = {
                         "old": subval1,
                         "new": subval2,
                     }
@@ -6628,14 +6644,6 @@ def script_retcode(
     )["retcode"]
 
 
-def _mk_fileclient():
-    """
-    Create a file client and add it to the context.
-    """
-    if "cp.fileclient" not in __context__:
-        __context__["cp.fileclient"] = salt.fileclient.get_file_client(__opts__)
-
-
 def _generate_tmp_path():
     return os.path.join("/tmp", "salt.docker.{}".format(uuid.uuid4().hex[:6]))
 
@@ -6649,11 +6657,10 @@ def _prepare_trans_tar(name, sls_opts, mods=None, pillar=None, extra_filerefs=""
     # reuse it from salt.ssh, however this function should
     # be somewhere else
     refs = salt.client.ssh.state.lowstate_file_refs(chunks, extra_filerefs)
-    _mk_fileclient()
-    trans_tar = salt.client.ssh.state.prep_trans_tar(
-        __context__["cp.fileclient"], chunks, refs, pillar, name
-    )
-    return trans_tar
+    with salt.fileclient.get_file_client(__opts__) as fileclient:
+        return salt.client.ssh.state.prep_trans_tar(
+            fileclient, chunks, refs, pillar, name
+        )
 
 
 def _compile_state(sls_opts, mods=None):

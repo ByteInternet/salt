@@ -11,6 +11,7 @@ import os
 import tempfile
 
 import pytest
+
 import salt.utils.cloud as cloud
 from salt.utils.cloud import __ssh_gateway_arguments as ssh_gateway_arguments
 from tests.support.mock import MagicMock, patch
@@ -205,6 +206,218 @@ def test_deploy_windows_custom_port():
         mock.assert_called_once_with("test", "Administrator", None, 1234)
 
 
+def test_run_psexec_command_cleanup_lingering_paexec():
+    pytest.importorskip("pypsexec.client", reason="Requires PyPsExec")
+    mock_psexec = patch("salt.utils.cloud.PsExecClient", autospec=True)
+    mock_scmr = patch("salt.utils.cloud.ScmrService", autospec=True)
+    # We're mocking 'remove_service' because all we care about is the cleanup
+    # command
+    mock_rm_svc = patch("salt.utils.cloud.Client.remove_service", autospec=True)
+    with mock_scmr, mock_rm_svc, mock_psexec as mock_client:
+        mock_client.return_value.session = MagicMock(username="Gary")
+        mock_client.return_value.connection = MagicMock(server_name="Krabbs")
+        mock_client.return_value.run_executable.return_value = (
+            "Sandy",
+            "MermaidMan",
+            "BarnicleBoy",
+        )
+        cloud.run_psexec_command(
+            "spongebob",
+            "squarepants",
+            "patrick",
+            "squidward",
+            "plankton",
+        )
+        mock_client.return_value.cleanup.assert_called_once()
+
+
+@pytest.mark.skip_unless_on_windows(reason="Only applicable for Windows.")
+def test_deploy_windows_programdata():
+    """
+    Test deploy_windows with a custom port
+    """
+    mock_true = MagicMock(return_value=True)
+    mock_tuple = MagicMock(return_value=(0, 0, 0))
+    mock_conn = MagicMock()
+
+    with patch("salt.utils.smb", MagicMock()) as mock_smb:
+        mock_smb.get_conn.return_value = mock_conn
+        mock_smb.mkdirs.return_value = None
+        mock_smb.put_file.return_value = None
+        mock_smb.delete_file.return_value = None
+        mock_smb.delete_directory.return_value = None
+        with patch("time.sleep", MagicMock()), patch.object(
+            cloud, "wait_for_port", mock_true
+        ), patch.object(cloud, "fire_event", MagicMock()), patch.object(
+            cloud, "wait_for_psexecsvc", mock_true
+        ), patch.object(
+            cloud, "run_psexec_command", mock_tuple
+        ):
+            cloud.deploy_windows(host="test", win_installer="")
+            expected = "ProgramData/Salt Project/Salt/conf/pki/minion"
+            mock_smb.mkdirs.assert_called_with(expected, conn=mock_conn)
+
+
+@pytest.mark.skip_unless_on_windows(reason="Only applicable for Windows.")
+def test_deploy_windows_programdata_minion_pub():
+    """
+    Test deploy_windows with a custom port
+    """
+    mock_true = MagicMock(return_value=True)
+    mock_tuple = MagicMock(return_value=(0, 0, 0))
+    mock_conn = MagicMock()
+
+    with patch("salt.utils.smb", MagicMock()) as mock_smb:
+        mock_smb.get_conn.return_value = mock_conn
+        mock_smb.mkdirs.return_value = None
+        mock_smb.put_file.return_value = None
+        mock_smb.put_str.return_value = None
+        mock_smb.delete_file.return_value = None
+        mock_smb.delete_directory.return_value = None
+        with patch("time.sleep", MagicMock()), patch.object(
+            cloud, "wait_for_port", mock_true
+        ), patch.object(cloud, "fire_event", MagicMock()), patch.object(
+            cloud, "wait_for_psexecsvc", mock_true
+        ), patch.object(
+            cloud, "run_psexec_command", mock_tuple
+        ):
+            cloud.deploy_windows(host="test", minion_pub="pub", win_installer="")
+            expected = "ProgramData\\Salt Project\\Salt\\conf\\pki\\minion\\minion.pub"
+            mock_smb.put_str.assert_called_with("pub", expected, conn=mock_conn)
+
+
+@pytest.mark.skip_unless_on_windows(reason="Only applicable for Windows.")
+def test_deploy_windows_programdata_minion_pem():
+    """
+    Test deploy_windows with a custom port
+    """
+    mock_true = MagicMock(return_value=True)
+    mock_tuple = MagicMock(return_value=(0, 0, 0))
+    mock_conn = MagicMock()
+
+    with patch("salt.utils.smb", MagicMock()) as mock_smb:
+        mock_smb.get_conn.return_value = mock_conn
+        mock_smb.mkdirs.return_value = None
+        mock_smb.put_file.return_value = None
+        mock_smb.put_str.return_value = None
+        mock_smb.delete_file.return_value = None
+        mock_smb.delete_directory.return_value = None
+        with patch("time.sleep", MagicMock()), patch.object(
+            cloud, "wait_for_port", mock_true
+        ), patch.object(cloud, "fire_event", MagicMock()), patch.object(
+            cloud, "wait_for_psexecsvc", mock_true
+        ), patch.object(
+            cloud, "run_psexec_command", mock_tuple
+        ):
+            cloud.deploy_windows(host="test", minion_pem="pem", win_installer="")
+            expected = "ProgramData\\Salt Project\\Salt\\conf\\pki\\minion\\minion.pem"
+            mock_smb.put_str.assert_called_with("pem", expected, conn=mock_conn)
+
+
+@pytest.mark.skip_unless_on_windows(reason="Only applicable for Windows.")
+def test_deploy_windows_programdata_master_sign_pub_file():
+    """
+    Test deploy_windows with a custom port
+    """
+    mock_true = MagicMock(return_value=True)
+    mock_tuple = MagicMock(return_value=(0, 0, 0))
+    mock_conn = MagicMock()
+
+    with patch("salt.utils.smb", MagicMock()) as mock_smb:
+        mock_smb.get_conn.return_value = mock_conn
+        mock_smb.mkdirs.return_value = None
+        mock_smb.put_file.return_value = None
+        mock_smb.put_str.return_value = None
+        mock_smb.delete_file.return_value = None
+        mock_smb.delete_directory.return_value = None
+        with patch("time.sleep", MagicMock()), patch.object(
+            cloud, "wait_for_port", mock_true
+        ), patch.object(cloud, "fire_event", MagicMock()), patch.object(
+            cloud, "wait_for_psexecsvc", mock_true
+        ), patch.object(
+            cloud, "run_psexec_command", mock_tuple
+        ):
+            cloud.deploy_windows(
+                host="test", master_sign_pub_file="test.txt", win_installer=""
+            )
+            expected = (
+                "ProgramData\\Salt Project\\Salt\\conf\\pki\\minion\\master_sign.pub"
+            )
+            called = False
+            for call in mock_smb.put_file.mock_calls:
+                if expected in call[1]:
+                    called = True
+            assert called
+
+
+@pytest.mark.skip_unless_on_windows(reason="Only applicable for Windows.")
+def test_deploy_windows_programdata_minion_conf_grains():
+    """
+    Test deploy_windows with a custom port
+    """
+    mock_true = MagicMock(return_value=True)
+    mock_tuple = MagicMock(return_value=(0, 0, 0))
+    mock_conn = MagicMock()
+
+    with patch("salt.utils.smb", MagicMock()) as mock_smb:
+        mock_smb.get_conn.return_value = mock_conn
+        mock_smb.mkdirs.return_value = None
+        mock_smb.put_file.return_value = None
+        mock_smb.put_str.return_value = None
+        mock_smb.delete_file.return_value = None
+        mock_smb.delete_directory.return_value = None
+        with patch("time.sleep", MagicMock()), patch.object(
+            cloud, "wait_for_port", mock_true
+        ), patch.object(cloud, "fire_event", MagicMock()), patch.object(
+            cloud, "wait_for_psexecsvc", mock_true
+        ), patch.object(
+            cloud, "run_psexec_command", mock_tuple
+        ):
+            minion_conf = {"grains": {"spongebob": "squarepants"}}
+            cloud.deploy_windows(host="test", minion_conf=minion_conf, win_installer="")
+            expected = "ProgramData\\Salt Project\\Salt\\conf\\grains"
+            called = False
+            for call in mock_smb.put_str.mock_calls:
+                if expected in call[1]:
+                    called = True
+            assert called
+
+
+@pytest.mark.skip_unless_on_windows(reason="Only applicable for Windows.")
+def test_deploy_windows_programdata_minion_conf():
+    """
+    Test deploy_windows with a custom port
+    """
+    mock_true = MagicMock(return_value=True)
+    mock_tuple = MagicMock(return_value=(0, 0, 0))
+    mock_conn = MagicMock()
+
+    with patch("salt.utils.smb", MagicMock()) as mock_smb:
+        mock_smb.get_conn.return_value = mock_conn
+        mock_smb.mkdirs.return_value = None
+        mock_smb.put_file.return_value = None
+        mock_smb.put_str.return_value = None
+        mock_smb.delete_file.return_value = None
+        mock_smb.delete_directory.return_value = None
+        with patch("time.sleep", MagicMock()), patch.object(
+            cloud, "wait_for_port", mock_true
+        ), patch.object(cloud, "fire_event", MagicMock()), patch.object(
+            cloud, "wait_for_psexecsvc", mock_true
+        ), patch.object(
+            cloud, "run_psexec_command", mock_tuple
+        ):
+            minion_conf = {"master": "test-master"}
+            cloud.deploy_windows(host="test", minion_conf=minion_conf, win_installer="")
+            config = (
+                "ipc_mode: tcp\r\n"
+                "master: test-master\r\n"
+                "multiprocessing: true\r\n"
+                "pki_dir: /conf/pki/minion\r\n"
+            )
+            expected = "ProgramData\\Salt Project\\Salt\\conf\\minion"
+            mock_smb.put_str.assert_called_with(config, expected, conn=mock_conn)
+
+
 @pytest.mark.skip_unless_on_windows(reason="Only applicable for Windows.")
 def test_winrm_pinnned_version():
     """
@@ -392,3 +605,55 @@ def test_deploy_script_ssh_timeout():
         ssh_kwargs = root_cmd.call_args.kwargs
         assert "ssh_timeout" in ssh_kwargs
         assert ssh_kwargs["ssh_timeout"] == 34
+
+
+@pytest.mark.parametrize(
+    "master,expected",
+    [
+        (None, None),
+        ("single_master", "single_master"),
+        (["master1", "master2", "master3"], "master1,master2,master3"),
+    ],
+)
+def test__format_master_param(master, expected):
+    result = cloud._format_master_param(master)
+    assert result == expected
+
+
+@pytest.mark.skip_unless_on_windows(reason="Only applicable for Windows.")
+@pytest.mark.parametrize(
+    "master,expected",
+    [
+        (None, None),
+        ("single_master", "single_master"),
+        (["master1", "master2", "master3"], "master1,master2,master3"),
+    ],
+)
+def test_deploy_windows_master(master, expected):
+    """
+    Test deploy_windows with master parameter
+    """
+    mock_true = MagicMock(return_value=True)
+    mock_tuple = MagicMock(return_value=(0, 0, 0))
+    with patch("salt.utils.smb.get_conn", MagicMock()), patch(
+        "salt.utils.smb.mkdirs", MagicMock()
+    ), patch("salt.utils.smb.put_file", MagicMock()), patch(
+        "salt.utils.smb.delete_file", MagicMock()
+    ), patch(
+        "salt.utils.smb.delete_directory", MagicMock()
+    ), patch(
+        "time.sleep", MagicMock()
+    ), patch.object(
+        cloud, "wait_for_port", mock_true
+    ), patch.object(
+        cloud, "fire_event", MagicMock()
+    ), patch.object(
+        cloud, "wait_for_psexecsvc", mock_true
+    ), patch.object(
+        cloud, "run_psexec_command", mock_tuple
+    ) as mock:
+        cloud.deploy_windows(host="test", win_installer="install.exe", master=master)
+        expected_cmd = "c:\\salttemp\\install.exe"
+        expected_args = "/S /master={} /minion-name=None".format(expected)
+        assert mock.call_args_list[0].args[0] == expected_cmd
+        assert mock.call_args_list[0].args[1] == expected_args

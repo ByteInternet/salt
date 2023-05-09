@@ -31,7 +31,6 @@ import salt.ext.tornado.gen
 import salt.ext.tornado.ioloop
 import salt.loader
 import salt.loader.lazy
-import salt.log.setup
 import salt.payload
 import salt.pillar
 import salt.serializers.msgpack
@@ -124,7 +123,6 @@ def resolve_dns(opts, fallback=True):
         "use_master_when_local", False
     ):
         check_dns = False
-    # Since salt.log is imported below, salt.utils.network needs to be imported here as well
     import salt.utils.network
 
     if check_dns is True:
@@ -142,18 +140,12 @@ def resolve_dns(opts, fallback=True):
                         if retry_dns_count == 0:
                             raise SaltMasterUnresolvableError
                         retry_dns_count -= 1
-                    import salt.log
-
-                    msg = (
-                        "Master hostname: '{}' not found or not responsive. "
-                        "Retrying in {} seconds".format(
-                            opts["master"], opts["retry_dns"]
-                        )
+                    log.error(
+                        "Master hostname: '%s' not found or not responsive. "
+                        "Retrying in %s seconds",
+                        opts["master"],
+                        opts["retry_dns"],
                     )
-                    if salt.log.setup.is_console_configured():
-                        log.error(msg)
-                    else:
-                        print("WARNING: {}".format(msg))
                     time.sleep(opts["retry_dns"])
                     try:
                         ret["master_ip"] = salt.utils.network.dns_check(
@@ -828,11 +820,11 @@ class MinionBase:
                     self.connected = True
                     raise salt.ext.tornado.gen.Return((opts["master"], pub_channel))
                 except SaltClientError:
+                    if pub_channel:
+                        pub_channel.close()
                     if attempts == tries:
                         # Exhausted all attempts. Return exception.
                         self.connected = False
-                        if pub_channel:
-                            pub_channel.close()
                         raise
 
     def _discover_masters(self):
@@ -1139,7 +1131,8 @@ class MinionManager(MinionBase):
                     minion.setup_beacons(before_connect=True)
                 if minion.opts.get("scheduler_before_connect", False):
                     minion.setup_scheduler(before_connect=True)
-                yield minion.connect_master(failed=failed)
+                if minion.opts.get("master_type", "str") != "disable":
+                    yield minion.connect_master(failed=failed)
                 minion.tune_in(start=False)
                 self.minions.append(minion)
                 break
@@ -1245,7 +1238,6 @@ class Minion(MinionBase):
         self.safe = safe
 
         self._running = None
-        self.win_proc = []
         self.subprocess_list = salt.utils.process.SubprocessList()
         self.loaded_base_name = loaded_base_name
         self.connected = False
@@ -1371,7 +1363,7 @@ class Minion(MinionBase):
         )
 
         # a long-running req channel
-        self.req_channel = salt.transport.client.AsyncReqChannel.factory(
+        self.req_channel = salt.channel.client.AsyncReqChannel.factory(
             self.opts, io_loop=self.io_loop
         )
 
@@ -1631,7 +1623,7 @@ class Minion(MinionBase):
         with salt.utils.event.get_event(
             "minion", opts=self.opts, listen=False
         ) as event:
-            ret = yield event.fire_event(
+            ret = yield event.fire_event_async(
                 load, "__master_req_channel_payload", timeout=timeout
             )
             raise salt.ext.tornado.gen.Return(ret)
@@ -1711,6 +1703,7 @@ class Minion(MinionBase):
         Override this method if you wish to handle the decoded data
         differently.
         """
+
         # Ensure payload is unicode. Disregard failure to decode binary blobs.
         if "user" in data:
             log.info(
@@ -1773,7 +1766,7 @@ class Minion(MinionBase):
         multiprocessing_enabled = self.opts.get("multiprocessing", True)
         name = "ProcessPayload(jid={})".format(data["jid"])
         if multiprocessing_enabled:
-            if sys.platform.startswith("win"):
+            if salt.utils.platform.spawning_platform():
                 # let python reconstruct the minion on the other side if we're
                 # running on windows
                 instance = None
@@ -2690,6 +2683,8 @@ class Minion(MinionBase):
 
         if "proxy_target" in data and self.opts.get("metaproxy") == "deltaproxy":
             proxy_target = data["proxy_target"]
+            if proxy_target not in self.deltaproxy_objs:
+                raise salt.ext.tornado.gen.Return()
             _minion = self.deltaproxy_objs[proxy_target]
         else:
             _minion = self
@@ -2701,10 +2696,10 @@ class Minion(MinionBase):
                 notify=data.get("notify", False),
             )
         elif tag.startswith("__master_req_channel_payload"):
-            yield self.req_channel.send(
+            yield _minion.req_channel.send(
                 data,
-                timeout=self._return_retry_timer(),
-                tries=self.opts["return_retry_tries"],
+                timeout=_minion._return_retry_timer(),
+                tries=_minion.opts["return_retry_tries"],
             )
         elif tag.startswith("pillar_refresh"):
             yield _minion.pillar_refresh(
@@ -2822,10 +2817,8 @@ class Minion(MinionBase):
                             self.opts["master"],
                         )
 
-                        self.req_channel = (
-                            salt.transport.client.AsyncReqChannel.factory(
-                                self.opts, io_loop=self.io_loop
-                            )
+                        self.req_channel = salt.channel.client.AsyncReqChannel.factory(
+                            self.opts, io_loop=self.io_loop
                         )
 
                         # put the current schedule into the new loaders
@@ -3285,7 +3278,8 @@ class Syndic(Minion):
         # Set up default tgt_type
         if "tgt_type" not in data:
             data["tgt_type"] = "glob"
-        kwargs = {}
+
+        kwargs = {"auth_list": data.pop("auth_list", [])}
 
         # optionally add a few fields to the publish data
         for field in (
@@ -3312,6 +3306,32 @@ class Syndic(Minion):
                 callback=lambda _: None,
                 **kwargs
             )
+
+    def _send_req_sync(self, load, timeout):
+        if self.opts["minion_sign_messages"]:
+            log.trace("Signing event to be published onto the bus.")
+            minion_privkey_path = os.path.join(self.opts["pki_dir"], "minion.pem")
+            sig = salt.crypt.sign_message(
+                minion_privkey_path, salt.serializers.msgpack.serialize(load)
+            )
+            load["sig"] = sig
+        return self.req_channel.send(
+            load, timeout=timeout, tries=self.opts["return_retry_tries"]
+        )
+
+    @salt.ext.tornado.gen.coroutine
+    def _send_req_async(self, load, timeout):
+        if self.opts["minion_sign_messages"]:
+            log.trace("Signing event to be published onto the bus.")
+            minion_privkey_path = os.path.join(self.opts["pki_dir"], "minion.pem")
+            sig = salt.crypt.sign_message(
+                minion_privkey_path, salt.serializers.msgpack.serialize(load)
+            )
+            load["sig"] = sig
+        ret = yield self.async_req_channel.send(
+            load, timeout=timeout, tries=self.opts["return_retry_tries"]
+        )
+        return ret
 
     def fire_master_syndic_start(self):
         # Send an event to the master that the minion is live
@@ -3342,6 +3362,8 @@ class Syndic(Minion):
 
         # add handler to subscriber
         self.pub_channel.on_recv(self._process_cmd_socket)
+        self.req_channel = salt.channel.client.ReqChannel.factory(self.opts)
+        self.async_req_channel = salt.channel.client.ReqChannel.factory(self.opts)
 
     def _process_cmd_socket(self, payload):
         if payload is not None and payload["enc"] == "aes":
@@ -3690,7 +3712,7 @@ class SyndicManager(MinionBase):
                 # __'s to make sure it doesn't print out on the master cli
                 jdict["__master_id__"] = master
             ret = {}
-            for key in "return", "retcode", "success":
+            for key in "return", "retcode", "success", "fun_args":
                 if key in data:
                     ret[key] = data[key]
             jdict[data["id"]] = ret
@@ -3805,6 +3827,16 @@ class ProxyMinion(Minion):
         """
         mp_call = _metaproxy_call(self.opts, "post_master_init")
         return mp_call(self, master)
+
+    @salt.ext.tornado.gen.coroutine
+    def subproxy_post_master_init(self, minion_id, uid):
+        """
+        Function to finish init for the sub proxies
+
+        :rtype : None
+        """
+        mp_call = _metaproxy_call(self.opts, "subproxy_post_master_init")
+        return mp_call(self, minion_id, uid)
 
     def tune_in(self, start=True):
         """

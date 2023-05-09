@@ -7,13 +7,14 @@ import functools
 import logging
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
 import traceback
 from random import randint
 
-import salt.defaults.exitcodes  # pylint: disable=unused-import
+import salt.defaults.exitcodes
 from salt.exceptions import SaltClientError, SaltReqTimeoutError, SaltSystemExit
 
 log = logging.getLogger(__name__)
@@ -92,8 +93,16 @@ def minion_process():
     """
     Start a minion process
     """
-    import salt.utils.platform
+    # Because the minion is going to start on a separate process,
+    # salt._logging.in_mainprocess() will return False.
+    # We'll just force it to return True for this particular case so
+    # that proper logging can be set up.
+    import salt._logging
+
+    salt._logging.in_mainprocess.__pid__ = os.getpid()
+    # Now the remaining required imports
     import salt.cli.daemons
+    import salt.utils.platform
 
     # salt_minion spawns this function in a new process
 
@@ -161,8 +170,9 @@ def salt_minion():
 
     salt.utils.process.notify_systemd()
 
-    import salt.cli.daemons
     import multiprocessing
+
+    import salt.cli.daemons
 
     # Fix for setuptools generated scripts, so that it will
     # work with multiprocessing fork emulation.
@@ -199,7 +209,9 @@ def salt_minion():
     prev_sigterm_handler = signal.getsignal(signal.SIGTERM)
     while True:
         try:
-            process = multiprocessing.Process(target=minion_process, name="KeepAlive")
+            process = multiprocessing.Process(
+                target=minion_process, name="MinionKeepAlive"
+            )
             process.start()
             signal.signal(
                 signal.SIGTERM,
@@ -318,9 +330,10 @@ def salt_proxy():
     """
     Start a proxy minion.
     """
+    import multiprocessing
+
     import salt.cli.daemons
     import salt.utils.platform
-    import multiprocessing
 
     if "" in sys.path:
         sys.path.remove("")
@@ -573,3 +586,39 @@ def salt_unity():
         sys.argv.pop(1)
         s_fun = getattr(sys.modules[__name__], "salt_{}".format(cmd))
     s_fun()
+
+
+def _pip_args(args, target):
+    new_args = args[:]
+    target_in_args = False
+    for arg in args:
+        if "--target" in arg:
+            target_in_args = True
+    if "install" in args and not target_in_args:
+        new_args.append(f"--target={target}")
+    return new_args
+
+
+def _pip_environment(env, extras):
+    new_env = env.copy()
+    if "PYTHONPATH" in env:
+        new_env["PYTHONPATH"] = f"{extras}{os.pathsep}{env['PYTHONPATH']}"
+    else:
+        new_env["PYTHONPATH"] = extras
+    return new_env
+
+
+def salt_pip():
+    """
+    Proxy to current python's pip
+    """
+    extras = str(sys.RELENV / "extras-{}.{}".format(*sys.version_info))
+    env = _pip_environment(os.environ.copy(), extras)
+    args = _pip_args(sys.argv[1:], extras)
+    command = [
+        sys.executable,
+        "-m",
+        "pip",
+    ] + _pip_args(sys.argv[1:], extras)
+    ret = subprocess.run(command, shell=False, check=False, env=env)
+    sys.exit(ret.returncode)
